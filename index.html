@@ -440,13 +440,15 @@
     let breathing = 0;
     if(state === 'idle'){
       breathing = Math.sin(phase*0.6) * 0.03;
+    } else if(state === 'listening'){
+      breathing = (Math.sin(phase*1.8)*0.5+0.5) * 0.22 + 0.05;
     } else if(state === 'thinking'){
       breathing = Math.sin(phase*2.2) * 0.05 + 0.05;
     } else if(state === 'speaking'){
       breathing = (Math.sin(phase*3.1)*0.5+0.5) * 0.18;
     }
 
-    const amp = state === 'listening' ? level : breathing;
+    const amp = breathing;
 
     // outer rings
     const ringCount = 3;
@@ -541,7 +543,6 @@
       recognizing = true;
       setState('listening', 'ÉCOUTE');
       hintText.textContent = 'Je vous écoute…';
-      startMicMeter();
     };
 
     recognition.onresult = (event) => {
@@ -551,24 +552,20 @@
 
     recognition.onerror = (event) => {
       recognizing = false;
-      stopMicMeter();
       if(event.error === 'not-allowed' || event.error === 'service-not-allowed'){
         setState('error', 'MICRO REFUSÉ');
         hintText.textContent = 'Accès micro refusé — utilisez le texte ci-dessous';
-        textFallback.style.display = 'flex';
       } else if(event.error === 'no-speech'){
         setState('idle', 'EN VEILLE');
         hintText.textContent = 'Rien entendu — réessayez';
       } else {
         setState('error', 'ERREUR MICRO');
-        hintText.textContent = 'Erreur — réessayez ou écrivez';
-        textFallback.style.display = 'flex';
+        hintText.textContent = 'Erreur micro (' + event.error + ') — réessayez ou écrivez';
       }
     };
 
     recognition.onend = () => {
       recognizing = false;
-      stopMicMeter();
       if(state === 'listening'){
         setState('idle', 'EN VEILLE');
         hintText.textContent = 'Appuyer pour parler';
@@ -581,37 +578,7 @@
     talkBtn.style.opacity = 0.3;
   }
 
-  // ---- Mic level meter (visual only) ----
-  let audioCtx, analyser, micStream, meterRAF;
-  async function startMicMeter(){
-    try{
-      micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const source = audioCtx.createMediaStreamSource(micStream);
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      function meter(){
-        analyser.getByteFrequencyData(data);
-        let sum = 0;
-        for(let i=0;i<data.length;i++) sum += data[i];
-        const avg = sum / data.length / 255;
-        targetLevel = Math.min(1, avg * 3.2);
-        meterRAF = requestAnimationFrame(meter);
-      }
-      meter();
-    }catch(e){
-      // mic meter is cosmetic only; ignore failures silently
-    }
-  }
-  function stopMicMeter(){
-    targetLevel = 0;
-    if(meterRAF) cancelAnimationFrame(meterRAF);
-    if(micStream) micStream.getTracks().forEach(t => t.stop());
-    if(audioCtx) audioCtx.close();
-    micStream = null; audioCtx = null; analyser = null;
-  }
+  // ---- Ambient level animation while listening (no real audio stream, avoids conflicting with SpeechRecognition's own mic capture) ----
 
   // ---- Talk button ----
   talkBtn.addEventListener('click', () => {
@@ -705,7 +672,7 @@
         body: JSON.stringify({
           system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
           contents: contents,
-          generationConfig: { maxOutputTokens: 400 }
+          generationConfig: { maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "low" } }
         })
       }
     );
