@@ -661,22 +661,24 @@
       speak(reply);
     }catch(err){
       history.pop(); // remove the user turn that failed, so retry works cleanly
-      if(err && err.message === 'no-api-key'){
+      const msg = (err && err.message) || '';
+      if(msg === 'no-api-key'){
         setState('idle', 'EN VEILLE');
         hintText.textContent = 'Connecte ta clé Gemini';
         showSetup(false);
         return;
       }
-      if(err && err.message === 'bad-api-key'){
+      if(msg.startsWith('bad-api-key')){
         setState('error', 'CLÉ REFUSÉE');
         hintText.textContent = 'Clé refusée par Google';
+        addLine('jarvis', 'Détail technique : ' + msg.replace('bad-api-key: ', ''));
         showSetup(true);
         return;
       }
       setState('error', 'ERREUR');
-      hintText.textContent = 'Erreur de connexion — réessayez';
-      addLine('jarvis', "Désolé, une erreur de connexion m'empêche de répondre pour l'instant.");
-      setTimeout(() => { setState('idle', 'EN VEILLE'); hintText.textContent = 'Appuyer pour parler'; }, 2200);
+      hintText.textContent = 'Erreur — voir détail ci-dessus';
+      addLine('jarvis', 'Erreur technique : ' + (msg || 'inconnue') + '. (Vérifie ta connexion internet ou réessaie.)');
+      setTimeout(() => { setState('idle', 'EN VEILLE'); hintText.textContent = 'Appuyer pour parler'; }, 3000);
     }
   }
 
@@ -708,9 +710,19 @@
       }
     );
 
-    if(response.status === 400 || response.status === 403){
-      clearApiKey();
-      throw new Error('bad-api-key');
+    if(!response.ok){
+      let detail = '';
+      try{
+        const errJson = await response.json();
+        detail = errJson?.error?.message || JSON.stringify(errJson).slice(0,200);
+      }catch(e){
+        detail = await response.text().catch(() => '');
+      }
+      if(response.status === 400 || response.status === 403 || response.status === 401){
+        clearApiKey();
+        throw new Error('bad-api-key: [' + response.status + '] ' + detail);
+      }
+      throw new Error('http-' + response.status + ': ' + detail);
     }
 
     const data = await response.json();
